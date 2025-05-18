@@ -1,12 +1,12 @@
-use crate::args;
 use anyhow::{Context, Error, Result};
 use num_cpus;
 use rayon::prelude::*;
 use std::{
     io::Write,
-    os::windows::fs::MetadataExt,
     path::{Path, PathBuf},
 };
+
+use crate::args;
 
 struct TarFileData {
     rel_path: PathBuf,
@@ -123,7 +123,7 @@ impl TarWriter {
         let file = std::fs::File::open(path)
             .with_context(|| format!("Failed to open file {:?} for reading", path))?;
 
-        if small_file_size > 0 && path.metadata()?.file_size() >= small_file_size {
+        if small_file_size > 0 && path.metadata()?.len() >= small_file_size {
             // println!("Large file {}: {:?}", i, path);
             tx.send(TarFileData {
                 file: file,
@@ -200,7 +200,7 @@ pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Resul
 /// `args` - Configuration arguments containing decompression settings
 /// `input` - Read implementer that provides the compressed tarball data
 /// `dest_dir` - Path to the directory where files will be extracted
-pub fn untar_zstd<R: std::io::Read>(args: &args::Args, input: R, dest_dir: &Path) -> Result<()> {
+pub fn untar_zstd<R: std::io::Read>(_args: &args::Args, input: R, dest_dir: &Path) -> Result<()> {
     // Create destination directory if it doesn't exist
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("Failed to create destination directory {:?}", dest_dir))?;
