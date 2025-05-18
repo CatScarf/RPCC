@@ -42,10 +42,12 @@ Options:
           - tarzstd: Archive to TAR and compress with ZSTD / Decompress with ZSTD and extract from TAR
 
       --ll <LOG_LEVEL>
+          Log level
+
           [default: 1]
 
-  -v, --v...
-
+  -l, --l...
+          Compress level
 
       --noldm
           Disable long distance matching (only for zstd)

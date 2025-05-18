@@ -33,10 +33,12 @@ pub struct Args {
     /// (defaults to input path with compression extension)
     pub output: Option<String>,
 
+    /// Log level
     #[arg(long = "ll", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..))]
     pub log_level: u8,
 
-    #[arg(long = "v", short = 'v', action = clap::ArgAction::Count)]
+    /// Compress level
+    #[arg(long = "l", short = 'l', action = clap::ArgAction::Count)]
     pub compress_level: Option<u8>,
 
     /// Disable long distance matching (only for zstd)
