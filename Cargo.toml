@@ -1,0 +1,15 @@
+[package]
+name = "rpcc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+strum = { version = "0.27", features = ["derive"] }
+zstd = { version = "0.13", features = ["zstdmt"] }
+tar = { version = "0.4", features = ["xattr"] }
+walkdir = "2.5"
+anyhow = "1.0.98"
+futures = "0.3.31"
+rayon = "1.10.0"
+num_cpus = "1.16.0"
