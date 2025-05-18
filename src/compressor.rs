@@ -2,10 +2,14 @@ use crate::args;
 use anyhow::{Context, Error, Result};
 use num_cpus;
 use rayon::prelude::*;
-use std::{io::Write, os::windows::fs::MetadataExt};
+use std::{
+    io::Write,
+    os::windows::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
 
 struct TarFileData {
-    rel_path: std::path::PathBuf,
+    rel_path: PathBuf,
     file: std::fs::File,
     cursor: Option<(std::io::Cursor<Vec<u8>>, tar::Header)>,
 }
@@ -15,7 +19,7 @@ struct TarWriter;
 impl TarWriter {
     fn start(
         args: &args::Args,
-        src_dir: &std::path::Path,
+        src_dir: &Path,
         tar_builder: &mut tar::Builder<impl Write>,
     ) -> Result<std::thread::JoinHandle<Result<(), Error>>, Error> {
         let (tx, rx) = std::sync::mpsc::sync_channel(100);
@@ -80,7 +84,7 @@ impl TarWriter {
     }
 
     fn join(
-        src_dir: &std::path::Path,
+        src_dir: &Path,
         thread: std::thread::JoinHandle<Result<(), Error>>,
     ) -> Result<(), Error> {
         match thread.join() {
@@ -102,7 +106,7 @@ impl TarWriter {
 
     fn send_tar_data(
         small_file_size: u64,
-        src_dir: &std::path::Path,
+        src_dir: &Path,
         tx: &std::sync::mpsc::SyncSender<TarFileData>,
         entry: walkdir::DirEntry,
     ) -> Result<(), Error> {
@@ -155,7 +159,7 @@ impl TarWriter {
 /// `args` - Configuration arguments containing compression settings
 /// `src_dir` - Path to the directory to be archived
 /// `output` - Write implementer that receives the compressed tarball data
-pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &std::path::Path, output: W) -> Result<()> {
+pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Result<()> {
     // ZSTD Encoder
 
     let err_msg = || format!("Failed to create zstd encoder for {:?}", src_dir);
@@ -189,4 +193,30 @@ pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &std::path::Path, output: 
     let zstd_encoder = tar_builder.into_inner()?;
     zstd_encoder.finish()?;
     TarWriter::join(&src_dir, thread?)
+}
+
+/// Extracts a tarball compressed with Zstandard (zstd) algorithm from the given input.
+///
+/// `args` - Configuration arguments containing decompression settings
+/// `input` - Read implementer that provides the compressed tarball data
+/// `dest_dir` - Path to the directory where files will be extracted
+pub fn untar_zstd<R: std::io::Read>(args: &args::Args, input: R, dest_dir: &Path) -> Result<()> {
+    // Create destination directory if it doesn't exist
+    std::fs::create_dir_all(dest_dir)
+        .with_context(|| format!("Failed to create destination directory {:?}", dest_dir))?;
+
+    // ZSTD Decoder
+    let err_msg = || format!("Failed to create zstd decoder for {:?}", dest_dir);
+
+    let zstd_decoder = zstd::stream::read::Decoder::new(input).with_context(err_msg)?;
+
+    // Tar Archive
+    let mut tar_archive = tar::Archive::new(zstd_decoder);
+
+    // Extract files
+    tar_archive
+        .unpack(dest_dir)
+        .with_context(|| format!("Failed to extract tarball to {:?}", dest_dir))?;
+
+    Ok(())
 }

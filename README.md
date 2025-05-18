@@ -9,8 +9,16 @@ Only supprt compress a folder to tar + zstd now.
 You can download the latest release from the [Releases](https://github.com/CatScarf/rpcc/releases) or build it from source:
 
 ```bash
+# Build
 git clone git@github.com:CatScarf/rpcc.git
 cargo build --release
+```
+
+## Example
+
+```bash
+rpcc.exe c ./test
+rpcc.exe x ./test.tar.zst
 ```
 
 ## Usage
