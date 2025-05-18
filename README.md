@@ -2,7 +2,7 @@
 
 Rust Parallel Compressor for CLI, optimized for large volumes of small files.
 
-Only supprt compress a folder to tar + zstd now.
+Only support tar + zstd now.
 
 ## Download
 
@@ -14,14 +14,16 @@ git clone git@github.com:CatScarf/rpcc.git
 cargo build --release
 ```
 
-## Example
+## Usage
 
 ```bash
-rpcc.exe c ./test
-rpcc.exe x ./test.tar.zst
+# Compress ./test to ./test.tar.zst
+rpcc c ./test
+# Decompress ./test.tar.zst to ./
+rpcc x ./test.tar.zst
 ```
 
-## Usage
+## Options
 
 ```text
 Usage: rpcc.exe [OPTIONS] <COMMAND> <INPUT> [OUTPUT]
