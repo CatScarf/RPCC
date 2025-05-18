@@ -1,0 +1,91 @@
+name: Rust
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os:
+          [
+            windows-latest,
+            ubuntu-latest,
+            ubuntu-24.04-arm,
+            macos-latest,
+            macos-13,
+          ]
+        include:
+          - os: windows-latest
+            artifact_suffix: windows-x86_64.exe
+          - os: ubuntu-latest
+            artifact_suffix: linux-x86_64
+          - os: ubuntu-24.04-arm
+            artifact_suffix: linux-arm64
+          - os: macos-latest
+            artifact_suffix: macos-arm64
+          - os: macos-13
+            artifact_suffix: macos-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chmod
+        if: matrix.os != 'windows-latest'
+        run: chmod u+x ./cicd/*.sh
+
+      - name: Set vars
+        shell: bash
+        id: vars
+        run: ./cicd/set_vars.sh
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.APP_VERSION }}-${{ matrix.artifact_suffix }}
+          path: target/release/${{ steps.vars.outputs.APP_NAME }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chmod
+        if: matrix.os != 'windows-latest'
+        run: chmod u+x ./cicd/*.sh
+
+      - name: Set vars
+        shell: bash
+        id: vars
+        run: ./cicd/set_vars.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip artifacts
+        shell: bash
+        run: ./cicd/zip_artifacts.sh
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ steps.vars.outputs.APP_VERSION }}-${{ steps.vars.outputs.APP_BUILD_TIME }}
+          name: Release ${{ steps.vars.outputs.APP_VERSION }}-${{ steps.vars.outputs.APP_BUILD_TIME }}
+          files: ./artifacts/*.zip

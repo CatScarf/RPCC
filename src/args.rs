@@ -38,7 +38,7 @@ pub struct Args {
     pub log_level: u8,
 
     /// Compress level
-    #[arg(long = "l", short = 'l', action = clap::ArgAction::Count)]
+    #[arg(long = "l", short = 'l')]
     pub compress_level: Option<u8>,
 
     /// Disable long distance matching (only for zstd)
