@@ -23,7 +23,7 @@ jobs:
           ]
         include:
           - os: windows-latest
-            artifact_suffix: windows-arm64.exe
+            artifact_suffix: windows-x86_64.exe
           - os: ubuntu-latest
             artifact_suffix: linux-x86_64
           - os: ubuntu-24.04-arm
