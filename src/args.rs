@@ -47,5 +47,5 @@ pub struct Args {
 
     /// Only size smaller than this will be read in parallel
     #[arg(long = "sfs", default_value = "10485760")]
-    pub small_file_size: Option<u64>,
+    pub small_file_size: u64,
 }

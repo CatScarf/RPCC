@@ -6,8 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::args;
-
 struct TarFileData {
     rel_path: PathBuf,
     file: std::fs::File,
@@ -18,13 +16,13 @@ struct TarWriter;
 
 impl TarWriter {
     fn start(
-        args: &args::Args,
         src_dir: &Path,
         tar_builder: &mut tar::Builder<impl Write>,
+        small_file_size: u64,
+        log_level: u8,
     ) -> Result<std::thread::JoinHandle<Result<(), Error>>, Error> {
         let (tx, rx) = std::sync::mpsc::sync_channel(100);
 
-        let small_file_size = args.small_file_size.unwrap_or(0);
         let src_dir_buf = src_dir.to_path_buf();
 
         // Start the thread to process files in the directory
@@ -75,7 +73,7 @@ impl TarWriter {
                     .with_context(err_msg)?;
             }
 
-            if args.log_level >= 3 {
+            if log_level >= 3 {
                 println!("Added {} {:?}", i, &data.rel_path);
             }
         }
@@ -155,22 +153,22 @@ impl TarWriter {
 }
 
 /// Creates a tarball compressed with Zstandard (zstd) algorithm and writes it to the given output.
-///
-/// `args` - Configuration arguments containing compression settings
-/// `src_dir` - Path to the directory to be archived
-/// `output` - Write implementer that receives the compressed tarball data
-pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Result<()> {
+pub fn tar_zstd<W: Write>(
+    src_dir: &Path,
+    output: &mut W,
+    compress_level: u8,
+    no_long_distance_matching: bool,
+    small_file_size: u64,
+    log_level: u8,
+) -> Result<()> {
     // ZSTD Encoder
 
     let err_msg = || format!("Failed to create zstd encoder for {:?}", src_dir);
 
-    let mut level = 3;
-    if let Some(l) = args.compress_level {
-        level = l.min(22).max(1);
-    }
+    let level = compress_level.min(22).max(1);
 
     let mut zstd_encoder = zstd::stream::write::Encoder::new(output, level.into())?;
-    if !args.no_long_distance_matching {
+    if !no_long_distance_matching {
         zstd_encoder
             .long_distance_matching(true)
             .with_context(err_msg)?;
@@ -186,7 +184,7 @@ pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Resul
 
     // Start
 
-    let thread = TarWriter::start(args, &src_dir, &mut tar_builder);
+    let thread = TarWriter::start(&src_dir, &mut tar_builder, small_file_size, log_level);
 
     // End
 
@@ -196,11 +194,7 @@ pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Resul
 }
 
 /// Extracts a tarball compressed with Zstandard (zstd) algorithm from the given input.
-///
-/// `args` - Configuration arguments containing decompression settings
-/// `input` - Read implementer that provides the compressed tarball data
-/// `dest_dir` - Path to the directory where files will be extracted
-pub fn untar_zstd<R: std::io::Read>(_args: &args::Args, input: R, dest_dir: &Path) -> Result<()> {
+pub fn untar_zstd<R: std::io::Read>(input: &mut R, dest_dir: &Path) -> Result<()> {
     // Create destination directory if it doesn't exist
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("Failed to create destination directory {:?}", dest_dir))?;
@@ -219,4 +213,91 @@ pub fn untar_zstd<R: std::io::Read>(_args: &args::Args, input: R, dest_dir: &Pat
         .with_context(|| format!("Failed to extract tarball to {:?}", dest_dir))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn calculate_hash(dir: &Path) -> Result<HashMap<String, String>, Error> {
+        let result = walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                if entry.file_type().is_file() {
+                    let path = entry.path();
+                    let mut file = std::fs::File::open(path).ok()?;
+                    let mut hasher = blake3::Hasher::new();
+                    std::io::copy(&mut file, &mut hasher).ok()?;
+                    let hash = hasher.finalize();
+
+                    let rel_path = path.strip_prefix(dir).ok()?;
+
+                    Some((
+                        rel_path.to_string_lossy().to_string(),
+                        hash.to_hex().to_string(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<HashMap<_, _>>();
+        Ok(result)
+    }
+
+    #[test]
+    fn test_tar_zstd() {
+        // Create temporary directory
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        let dest_dir = temp_dir.path().join("dest");
+
+        if src_dir.exists() {
+            std::fs::remove_dir_all(&src_dir).unwrap();
+        }
+
+        if dest_dir.exists() {
+            std::fs::remove_dir_all(&dest_dir).unwrap();
+        }
+
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        // Add test files
+
+        let test_small = src_dir.join("test_small.txt");
+        let test_small2 = src_dir.join("dir/test_small.txt");
+        let test_big = src_dir.join("test_big.txt");
+
+        std::fs::write(&test_small, "This is a small test file.").unwrap();
+        std::fs::create_dir_all(test_small2.parent().unwrap()).unwrap();
+        std::fs::write(&test_small2, "This is a small test file in a subdirectory.").unwrap();
+
+        let size_mb = 30;
+        let mut data = String::with_capacity(size_mb * 1024 * 1024);
+        while data.len() < size_mb * 1024 * 1024 {
+            data.push_str("This is a big test file.\n");
+        }
+        std::fs::write(&test_big, &data[..size_mb * 1024 * 1024]).unwrap();
+
+        // Calculate md5 to hashmap
+
+        let before_hash = calculate_hash(&src_dir).unwrap();
+
+        // Compress the directory
+
+        let mut buf: Vec<u8> = Vec::new();
+        tar_zstd(&src_dir, &mut buf, 3, false, 10 * 1024 * 1024, 0).unwrap();
+
+        // Decompress the tarball
+
+        let mut reader = std::io::Cursor::new(buf);
+        untar_zstd(&mut reader, &dest_dir).unwrap();
+
+        // Calculate md5 to hashmap
+        let after_hash = calculate_hash(&dest_dir).unwrap();
+
+        assert_eq!(before_hash == after_hash, true);
+    }
 }
