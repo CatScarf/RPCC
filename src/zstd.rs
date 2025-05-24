@@ -6,8 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::args;
-
 struct TarFileData {
     rel_path: PathBuf,
     file: std::fs::File,
@@ -18,13 +16,13 @@ struct TarWriter;
 
 impl TarWriter {
     fn start(
-        args: &args::Args,
         src_dir: &Path,
         tar_builder: &mut tar::Builder<impl Write>,
+        small_file_size: u64,
+        log_level: u8,
     ) -> Result<std::thread::JoinHandle<Result<(), Error>>, Error> {
         let (tx, rx) = std::sync::mpsc::sync_channel(100);
 
-        let small_file_size = args.small_file_size.unwrap_or(0);
         let src_dir_buf = src_dir.to_path_buf();
 
         // Start the thread to process files in the directory
@@ -75,7 +73,7 @@ impl TarWriter {
                     .with_context(err_msg)?;
             }
 
-            if args.log_level >= 3 {
+            if log_level >= 3 {
                 println!("Added {} {:?}", i, &data.rel_path);
             }
         }
@@ -155,22 +153,22 @@ impl TarWriter {
 }
 
 /// Creates a tarball compressed with Zstandard (zstd) algorithm and writes it to the given output.
-///
-/// `args` - Configuration arguments containing compression settings
-/// `src_dir` - Path to the directory to be archived
-/// `output` - Write implementer that receives the compressed tarball data
-pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Result<()> {
+pub fn tar_zstd<W: Write + ?Sized>(
+    src_dir: &Path,
+    output: &mut W,
+    compress_level: u8,
+    no_long_distance_matching: bool,
+    small_file_size: u64,
+    log_level: u8,
+) -> Result<()> {
     // ZSTD Encoder
 
     let err_msg = || format!("Failed to create zstd encoder for {:?}", src_dir);
 
-    let mut level = 3;
-    if let Some(l) = args.compress_level {
-        level = l.min(22).max(1);
-    }
+    let level = compress_level.min(22).max(1);
 
     let mut zstd_encoder = zstd::stream::write::Encoder::new(output, level.into())?;
-    if !args.no_long_distance_matching {
+    if !no_long_distance_matching {
         zstd_encoder
             .long_distance_matching(true)
             .with_context(err_msg)?;
@@ -186,7 +184,7 @@ pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Resul
 
     // Start
 
-    let thread = TarWriter::start(args, &src_dir, &mut tar_builder);
+    let thread = TarWriter::start(&src_dir, &mut tar_builder, small_file_size, log_level);
 
     // End
 
@@ -196,11 +194,7 @@ pub fn tar_zstd<W: Write>(args: &args::Args, src_dir: &Path, output: W) -> Resul
 }
 
 /// Extracts a tarball compressed with Zstandard (zstd) algorithm from the given input.
-///
-/// `args` - Configuration arguments containing decompression settings
-/// `input` - Read implementer that provides the compressed tarball data
-/// `dest_dir` - Path to the directory where files will be extracted
-pub fn untar_zstd<R: std::io::Read>(_args: &args::Args, input: R, dest_dir: &Path) -> Result<()> {
+pub fn untar_zstd<R: std::io::Read + ?Sized>(input: &mut R, dest_dir: &Path) -> Result<()> {
     // Create destination directory if it doesn't exist
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("Failed to create destination directory {:?}", dest_dir))?;
@@ -219,4 +213,18 @@ pub fn untar_zstd<R: std::io::Read>(_args: &args::Args, input: R, dest_dir: &Pat
         .with_context(|| format!("Failed to extract tarball to {:?}", dest_dir))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests;
+
+    #[test]
+    fn test_tar_zstd() {
+        tests::tests::test_compression_roundtrip(
+            |path, writer| tar_zstd(path, writer, 3, false, 10 * 1024 * 1024, 0),
+            |reader, path| untar_zstd(reader, path),
+        )
+    }
 }

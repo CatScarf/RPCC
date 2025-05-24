@@ -2,8 +2,9 @@ use anyhow::{Context, Error, Result};
 use clap::Parser;
 
 mod args;
-mod compressor;
 mod utils;
+mod zstd;
+mod tests;
 
 fn prepare_paths(args: &args::Args) -> Result<(std::path::PathBuf, std::path::PathBuf), Error> {
     let input = std::path::Path::new(&args.input).to_path_buf();
@@ -61,10 +62,18 @@ fn main() -> Result<()> {
                 println!("Compress from: {:?}", input);
                 println!("Compress to  : {:?}", output);
             }
-            let output_writer = std::fs::File::create(&output)
+            let mut output_writer = std::fs::File::create(&output)
                 .with_context(|| format!("Failed to create file: {:?}", &output))?;
 
-            compressor::tar_zstd(&args, &input, output_writer).with_context(|| {
+            zstd::tar_zstd(
+                &input,
+                &mut output_writer,
+                args.compress_level.unwrap_or(3),
+                args.no_long_distance_matching,
+                args.small_file_size,
+                args.log_level,
+            )
+            .with_context(|| {
                 format!(
                     "Failed to create tar zstd from: {:?} to: {:?}",
                     input, output
@@ -92,9 +101,9 @@ fn main() -> Result<()> {
                 println!("Decompress from: {:?}", input);
                 println!("Decompress to  : {:?}", output);
             }
-            let input_reader = std::fs::File::open(&input)
+            let mut input_reader = std::fs::File::open(&input)
                 .with_context(|| format!("Failed to open file: {:?}", &input))?;
-            compressor::untar_zstd(&args, &input_reader, &output).with_context(|| {
+            zstd::untar_zstd(&mut input_reader, &output).with_context(|| {
                 format!(
                     "Failed to decompress tar zstd from: {:?} to: {:?}",
                     input, output
