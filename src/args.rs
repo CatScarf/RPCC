@@ -11,8 +11,8 @@ pub enum Command {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum CompressType {
-    /// Archive to TAR and compress with ZSTD / Decompress with ZSTD and extract from TAR
     TARZSTD,
+    ZIP,
 }
 
 #[derive(Parser, Debug)]

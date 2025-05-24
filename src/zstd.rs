@@ -1,13 +1,9 @@
 use anyhow::{Context, Error, Result};
 use num_cpus;
 use rayon::prelude::*;
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
 
 struct TarFileData {
-    rel_path: PathBuf,
+    rel_path: std::path::PathBuf,
     file: std::fs::File,
     cursor: Option<(std::io::Cursor<Vec<u8>>, tar::Header)>,
 }
@@ -16,8 +12,8 @@ struct TarWriter;
 
 impl TarWriter {
     fn start(
-        src_dir: &Path,
-        tar_builder: &mut tar::Builder<impl Write>,
+        src_dir: &std::path::Path,
+        tar_builder: &mut tar::Builder<impl std::io::Write>,
         small_file_size: u64,
         log_level: u8,
     ) -> Result<std::thread::JoinHandle<Result<(), Error>>, Error> {
@@ -82,7 +78,7 @@ impl TarWriter {
     }
 
     fn join(
-        src_dir: &Path,
+        src_dir: &std::path::Path,
         thread: std::thread::JoinHandle<Result<(), Error>>,
     ) -> Result<(), Error> {
         match thread.join() {
@@ -104,17 +100,16 @@ impl TarWriter {
 
     fn send_tar_data(
         small_file_size: u64,
-        src_dir: &Path,
+        src_dir: &std::path::Path,
         tx: &std::sync::mpsc::SyncSender<TarFileData>,
         entry: walkdir::DirEntry,
     ) -> Result<(), Error> {
         let path = entry.path();
-
-        if path.is_dir() || path == src_dir {
+        if path.is_dir() {
             return Ok(());
         }
 
-        let rel_path = path
+        let relpath = path
             .strip_prefix(&src_dir)
             .with_context(|| format!("Failed to strip {:?} by {:?}", path, src_dir))?;
 
@@ -125,11 +120,11 @@ impl TarWriter {
             // println!("Large file {}: {:?}", i, path);
             tx.send(TarFileData {
                 file: file,
-                rel_path: rel_path.to_path_buf(),
+                rel_path: relpath.to_path_buf(),
                 cursor: None,
             })
             .with_context(|| {
-                format!("Failed to send data for file {:?} to tar archive", rel_path)
+                format!("Failed to send data for file {:?} to tar archive", relpath)
             })?;
             return Ok(());
         }
@@ -143,18 +138,18 @@ impl TarWriter {
 
         tx.send(TarFileData {
             file: file,
-            rel_path: rel_path.to_path_buf(),
+            rel_path: relpath.to_path_buf(),
             cursor: Some((cursor, header)),
         })
-        .with_context(|| format!("Failed to send data for file {:?} to tar archive", rel_path))?;
+        .with_context(|| format!("Failed to send data for file {:?} to tar archive", relpath))?;
 
         Ok(())
     }
 }
 
 /// Creates a tarball compressed with Zstandard (zstd) algorithm and writes it to the given output.
-pub fn tar_zstd<W: Write + ?Sized>(
-    src_dir: &Path,
+pub fn tar_zstd<W: std::io::Write + ?Sized>(
+    src_dir: &std::path::Path,
     output: &mut W,
     compress_level: u8,
     no_long_distance_matching: bool,
@@ -194,7 +189,10 @@ pub fn tar_zstd<W: Write + ?Sized>(
 }
 
 /// Extracts a tarball compressed with Zstandard (zstd) algorithm from the given input.
-pub fn untar_zstd<R: std::io::Read + ?Sized>(input: &mut R, dest_dir: &Path) -> Result<()> {
+pub fn untar_zstd<R: std::io::Read + ?Sized>(
+    input: &mut R,
+    dest_dir: &std::path::Path,
+) -> Result<()> {
     // Create destination directory if it doesn't exist
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("Failed to create destination directory {:?}", dest_dir))?;
@@ -208,9 +206,12 @@ pub fn untar_zstd<R: std::io::Read + ?Sized>(input: &mut R, dest_dir: &Path) -> 
     let mut tar_archive = tar::Archive::new(zstd_decoder);
 
     // Extract files
-    tar_archive
-        .unpack(dest_dir)
-        .with_context(|| format!("Failed to extract tarball to {:?}", dest_dir))?;
+    tar_archive.unpack(dest_dir).map_err(|e| {
+        Error::msg(format!(
+            "Failed to extract tarball to {:?}: {:?}",
+            dest_dir, e
+        ))
+    })?;
 
     Ok(())
 }
@@ -222,9 +223,22 @@ mod tests {
 
     #[test]
     fn test_tar_zstd() {
-        tests::tests::test_compression_roundtrip(
-            |path, writer| tar_zstd(path, writer, 3, false, 10 * 1024 * 1024, 0),
-            |reader, path| untar_zstd(reader, path),
+        let mut tester = tests::tests::Tester::new();
+
+        tar_zstd(
+            &tester.src_dir.path(),
+            &mut tester.intermediate,
+            3,
+            false,
+            10 * 1024 * 1024,
+            0,
         )
+        .unwrap();
+
+        tester.flush_intermediate(); 
+
+        untar_zstd(&mut tester.intermediate, &tester.dest_dir.path()).unwrap();
+
+        tester.assert();
     }
 }
