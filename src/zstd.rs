@@ -1,6 +1,10 @@
+use std::io::{Read, Write};
+
 use anyhow::{Context, Error, Result};
 use num_cpus;
 use rayon::prelude::*;
+
+use crate::utils;
 
 struct TarFileData {
     rel_path: std::path::PathBuf,
@@ -17,8 +21,9 @@ impl TarWriter {
         small_file_size: u64,
         log_level: u8,
     ) -> Result<std::thread::JoinHandle<Result<(), Error>>, Error> {
-        let (tx, rx) = std::sync::mpsc::sync_channel(100);
+        let progress = utils::Progress::new(log_level, "C".to_string());
 
+        let (tx, rx) = std::sync::mpsc::sync_channel(100);
         let src_dir_buf = src_dir.to_path_buf();
 
         // Start the thread to process files in the directory
@@ -45,12 +50,9 @@ impl TarWriter {
             Ok(())
         });
 
-        let mut i = 0;
-
         // Write the data to the tar archive
 
         while let Ok(mut data) = rx.recv() {
-            i += 1;
             let err_msg = || {
                 format!(
                     "Failed to append data for file {:?} to tar archive",
@@ -69,10 +71,13 @@ impl TarWriter {
                     .with_context(err_msg)?;
             }
 
-            if log_level >= 3 {
-                println!("Added {} {:?}", i, &data.rel_path);
-            }
+            progress.tx.send(utils::ProgressData::Data((
+                data.rel_path.to_string_lossy().to_string(),
+                data.file.metadata()?.len(),
+            )))?;
         }
+
+        progress.join()?;
 
         Ok(thread)
     }
@@ -192,28 +197,101 @@ pub fn tar_zstd<W: std::io::Write + ?Sized>(
 pub fn untar_zstd<R: std::io::Read + ?Sized>(
     input: &mut R,
     dest_dir: &std::path::Path,
-) -> Result<()> {
+    log_level: u8,
+) -> Result<(), Error> {
     // Create destination directory if it doesn't exist
+
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("Failed to create destination directory {:?}", dest_dir))?;
 
     // ZSTD Decoder
+
     let err_msg = || format!("Failed to create zstd decoder for {:?}", dest_dir);
 
     let zstd_decoder = zstd::stream::read::Decoder::new(input).with_context(err_msg)?;
 
     // Tar Archive
+
     let mut tar_archive = tar::Archive::new(zstd_decoder);
 
-    // Extract files
-    tar_archive.unpack(dest_dir).map_err(|e| {
-        Error::msg(format!(
-            "Failed to extract tarball to {:?}: {:?}",
-            dest_dir, e
-        ))
-    })?;
+    // Parallel writ
 
-    Ok(())
+    let (tx, rx) = crossbeam::channel::bounded(100);
+    let dest_dir_buf = dest_dir.to_path_buf();
+    let thread = std::thread::spawn(move || -> Result<(), Error> {
+        let result = rx
+            .iter()
+            .par_bridge()
+            .map(
+                |(path, buf, modified_time): (_, Vec<u8>, _)| -> Result<(), Error> {
+                    let dest_path = dest_dir_buf.join(&path);
+                    if let Some(parent) = dest_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    let mut file = std::fs::File::create(&dest_path)?;
+                    file.write_all(&buf)?;
+                    let modified_time = std::time::SystemTime::UNIX_EPOCH
+                        + std::time::Duration::from_secs(modified_time as u64);
+                    file.set_modified(modified_time)?;
+                    Ok(())
+                },
+            )
+            .filter(|result| !result.is_ok())
+            .collect::<Vec<_>>();
+        if !result.is_empty() {
+            Result::Err(Error::msg(format!(
+                "Failed to unzip all files to directory {:?}: {:?}",
+                dest_dir_buf, result
+            )))
+        } else {
+            Ok(())
+        }
+    });
+
+    // Extract
+
+    let progress = utils::Progress::new(log_level, "Dec".to_string());
+
+    let entries = tar_archive.entries()?;
+    for entry in entries {
+        let mut entry = entry?;
+        let path = dest_dir.join(entry.path()?);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let size = entry.size();
+        let mut buf = Vec::new();
+        let _ = entry.read_to_end(&mut buf);
+        let path = entry.header().path()?;
+        let modified_time = entry.header().mtime()?;
+        tx.send((path.to_path_buf(), buf, modified_time))?;
+        progress.tx.send(utils::ProgressData::Data((
+            path.to_string_lossy().to_string(),
+            size,
+        )))?;
+    }
+
+    progress.join()?;
+
+    drop(tx);
+    if let Err(e) = thread.join() {
+        Err(Error::msg(format!(
+            "Failed to join thread for extracting files from tar archive: {:?}",
+            e
+        )))
+    } else {
+        Ok(())
+    }
+
+    // // Extract files
+    // tar_archive.unpack(dest_dir).map_err(|e| {
+    //     Error::msg(format!(
+    //         "Failed to extract tarball to {:?}: {:?}",
+    //         dest_dir, e
+    //     ))
+    // })?;
+
+    // Ok(())
 }
 
 #[cfg(test)]
@@ -235,9 +313,9 @@ mod tests {
         )
         .unwrap();
 
-        tester.flush_intermediate(); 
+        tester.flush_intermediate();
 
-        untar_zstd(&mut tester.intermediate, &tester.dest_dir.path()).unwrap();
+        untar_zstd(&mut tester.intermediate, &tester.dest_dir.path(), 0).unwrap();
 
         tester.assert();
     }

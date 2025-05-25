@@ -34,7 +34,7 @@ pub struct Args {
     pub output: Option<String>,
 
     /// Log level
-    #[arg(long = "ll", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..))]
+    #[arg(long = "ll", default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..))]
     pub log_level: u8,
 
     /// Compress level

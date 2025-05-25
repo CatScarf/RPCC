@@ -43,7 +43,10 @@ fn prepare_paths(args: &args::Args) -> Result<(std::path::PathBuf, std::path::Pa
                     input.parent().unwrap().to_path_buf()
                 }
             };
-            if output.exists() && !output.is_dir() {
+            if !output.exists() {
+                std::fs::create_dir_all(&output)
+                    .with_context(|| format!("Failed to create directory: {:?}", &output))?;
+            } else if output.exists() && !output.is_dir() {
                 return Result::Err(Error::msg(format!(
                     "Output path is not a directory: {:?}",
                     output
@@ -73,10 +76,10 @@ fn after_compress(start: std::time::Instant, output: &std::path::Path, args: &ar
     let speed = size as f64 / elapsed.as_secs_f64();
     if args.log_level >= 1 {
         println!(
-            "Compress end : {}, {}, {}/s",
+            "Compress end : {:>8}, {:>8}/s, {:>6}",
             utils::readable_bytes(size),
+            utils::readable_bytes(speed as u64),
             utils::readable_elapse(elapsed.as_secs_f64()),
-            utils::readable_bytes(speed as u64)
         );
     }
 }
@@ -92,10 +95,10 @@ fn after_decompress(start: std::time::Instant, input: &std::path::Path, args: &a
     let speed = size as f64 / elapsed.as_secs_f64();
     if args.log_level >= 1 {
         println!(
-            "Decompress end : {}, {}, {}/s",
+            "Decompress end : {:>8}, {:>8}/s, {:>6}",
             utils::readable_bytes(size),
+            utils::readable_bytes(speed as u64),
             utils::readable_elapse(elapsed.as_secs_f64()),
-            utils::readable_bytes(speed as u64)
         );
     }
 }
@@ -132,7 +135,7 @@ fn main() -> Result<()> {
             let (input, output) = prepare_paths(&args)?;
             let mut input_reader = std::fs::File::open(&input)
                 .with_context(|| format!("Failed to open file: {:?}", &input))?;
-            zstd::untar_zstd(&mut input_reader, &output).with_context(|| {
+            zstd::untar_zstd(&mut input_reader, &output, args.log_level).with_context(|| {
                 format!(
                     "Failed to decompress tar zstd from: {:?} to: {:?}",
                     input, output
@@ -152,7 +155,7 @@ fn main() -> Result<()> {
             let (input, output) = prepare_paths(&args)?;
             let mut input_reader = std::fs::File::open(&input)
                 .with_context(|| format!("Failed to open file: {:?}", &input))?;
-            zip::unzip(&mut input_reader, &output).with_context(|| {
+            zip::unzip(&mut input_reader, &output, args.log_level).with_context(|| {
                 format!(
                     "Failed to decompress zip from: {:?} to: {:?}",
                     input, output

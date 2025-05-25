@@ -2,6 +2,8 @@ use anyhow::{Context, Error, Result};
 use rayon::prelude::*;
 use std::io::{Read, Write};
 
+use crate::utils;
+
 /// Creates a zip file with dflate algorithm and writes it to the given output.
 pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
     src_dir: &std::path::Path,
@@ -35,6 +37,11 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
                     .to_string_lossy()
                     .to_string();
 
+                let raw_size = path
+                    .metadata()
+                    .with_context(|| format!("Failed to get metadata for path {:?}", path))?
+                    .len();
+
                 let mut buff = std::io::Cursor::new(Vec::new());
                 {
                     let mut zip_writer = zip::ZipWriter::new(&mut buff);
@@ -46,7 +53,7 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
 
                 let zip_archive = zip::ZipArchive::new(buff)?;
 
-                tx.send((relpath_str, zip_archive))?;
+                tx.send((relpath_str, zip_archive, raw_size))?;
 
                 Ok(())
             })
@@ -63,21 +70,21 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
         }
     });
 
-    let mut i = 0;
-    while let Ok((relpath_str, mut zip_archive)) = rx.recv() {
-        i += 1;
+    let progress = utils::Progress::new(log_level, "C".to_string());
+
+    while let Ok((relpath_str, mut zip_archive, raw_size)) = rx.recv() {
         let zip_file = zip_archive.by_name(&relpath_str)?;
         total_zip_writer.raw_copy_file(zip_file).with_context(|| {
             format!(
                 "Failed to append data for file {:?} to zip archive",
-                relpath_str
+                &relpath_str
             )
         })?;
-        if log_level >= 3 {
-            println!("Added {} {:?}", i, &relpath_str);
-        }
+        progress
+            .tx
+            .send(utils::ProgressData::Data((relpath_str, raw_size)))?;
     }
-
+    progress.join()?;
     total_zip_writer.finish()?;
 
     match thread.join() {
@@ -89,6 +96,7 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
 pub fn unzip<R: std::io::Read + std::io::Seek + ?Sized>(
     input: &mut R,
     dest_dir: &std::path::Path,
+    log_level: u8,
 ) -> Result<(), Error> {
     let (tx, rx) = crossbeam::channel::bounded(100);
 
@@ -130,6 +138,8 @@ pub fn unzip<R: std::io::Read + std::io::Seek + ?Sized>(
         }
     });
 
+    let progress = utils::Progress::new(log_level, "Dec".to_string());
+
     let dest_dir_buf = dest_dir.to_path_buf();
     let archive = &mut zip::ZipArchive::new(input)?;
     let num_files = archive.len();
@@ -140,7 +150,11 @@ pub fn unzip<R: std::io::Read + std::io::Seek + ?Sized>(
             let name = file.name().to_string();
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
+            let len = buf.len() as u64;
             tx.send((name, buf))?;
+            progress
+                .tx
+                .send(utils::ProgressData::Data((file.name().to_string(), len)))?;
             Ok(())
         })
         .filter(|result| !result.is_ok())
@@ -154,6 +168,7 @@ pub fn unzip<R: std::io::Read + std::io::Seek + ?Sized>(
     }
 
     drop(tx);
+    progress.join()?;
 
     match thread.join() {
         Ok(result) => result,
@@ -172,7 +187,7 @@ mod tests {
 
         zip(&tester.src_dir.path(), &mut tester.intermediate, 0).unwrap();
         tester.flush_intermediate();
-        unzip(&mut tester.intermediate, &tester.dest_dir.path()).unwrap();
+        unzip(&mut tester.intermediate, &tester.dest_dir.path(), 0).unwrap();
 
         tester.assert();
     }
