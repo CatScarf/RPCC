@@ -2,8 +2,6 @@
 
 Rust Parallel Compressor for CLI, optimized for large volumes of small files.
 
-Only support tar + zstd now.
-
 ## Download
 
 You can download the latest release from the [Releases](https://github.com/CatScarf/rpcc/releases) or build it from source:

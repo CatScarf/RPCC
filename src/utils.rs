@@ -53,7 +53,9 @@ impl Progress {
                         let interval = if first { 1 } else { 5 };
                         first = false;
                         std::thread::sleep(std::time::Duration::from_secs(interval));
-                        tx_clone.send(ProgressData::Print).unwrap();
+                        if let Err(_) = tx_clone.send(ProgressData::Print) {
+                            break;
+                        }
                     }
                 });
             }
