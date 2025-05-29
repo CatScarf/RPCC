@@ -24,7 +24,7 @@ rpcc x ./test.tar.zst
 ## Options
 
 ```text
-Usage: rpcc.exe [OPTIONS] <COMMAND> <INPUT> [OUTPUT]
+Usage: rpcc [OPTIONS] <COMMAND> <INPUT> [OUTPUT]
 
 Arguments:
   <COMMAND>
@@ -45,16 +45,14 @@ Options:
           Set type of archive
 
           [default: tarzstd]
-
-          Possible values:
-          - tarzstd: Archive to TAR and compress with ZSTD / Decompress with ZSTD and extract from TAR
+          [possible values: tarzstd, zip]
 
       --ll <LOG_LEVEL>
           Log level
 
-          [default: 1]
+          [default: 2]
 
-  -l, --l...
+  -l, --l <COMPRESS_LEVEL>
           Compress level
 
       --noldm

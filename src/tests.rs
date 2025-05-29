@@ -38,16 +38,23 @@ pub mod tests {
 
         std::fs::create_dir_all(&src_dir).unwrap();
 
-        // Add test files
+        // Test files
 
         let test_small = src_dir.path().join("test_small.txt");
-        let test_small2 = src_dir.path().join("dir/test_small.txt");
-        let test_big = src_dir.path().join("test_big.txt");
-
         std::fs::write(&test_small, "This is a small test file.").unwrap();
+
+        let test_small2 = src_dir.path().join("dir/test_small.txt");
         std::fs::create_dir_all(test_small2.parent().unwrap()).unwrap();
         std::fs::write(&test_small2, "This is a small test file in a subdirectory.").unwrap();
 
+        let long_name: String = (1..=50)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("_");
+        let test_long = src_dir.path().join(format!("{}.txt", long_name));
+        std::fs::write(&test_long, "This is a log file with a long name.").unwrap();
+
+        let test_big = src_dir.path().join("test_big.txt");
         let size_mb = 30;
         let mut data = String::with_capacity(size_mb * 1024 * 1024);
         while data.len() < size_mb * 1024 * 1024 {
@@ -92,29 +99,4 @@ pub mod tests {
             self.intermediate.set_position(0);
         }
     }
-
-    // pub fn test_compression_roundtrip<C, D>(compress_fn: C, decompress_fn: D)
-    // where
-    //     C: Fn(&std::path::Path, &mut dyn std::io::Write) -> Result<()>,
-    //     D: Fn(&mut dyn std::io::Read, &std::path::Path) -> Result<()>,
-    // {
-    //     // Prepare test data
-    //     let (src_dir, dest_dir) = prepare_compress_test_data();
-
-    //     // Calculate md5 to hashmap
-    //     let before_hash = calculate_hash(&src_dir.path()).unwrap();
-
-    //     // Compress the directory
-    //     let mut buf: Vec<u8> = Vec::new();
-    //     compress_fn(&src_dir.path(), &mut buf).unwrap();
-
-    //     // Decompress the tarball
-    //     let mut reader = std::io::Cursor::new(buf);
-    //     decompress_fn(&mut reader, &dest_dir.path()).unwrap();
-
-    //     // Calculate md5 to hashmap
-    //     let after_hash = calculate_hash(&dest_dir.path()).unwrap();
-
-    //     assert_eq!(before_hash, after_hash);
-    // }
 }

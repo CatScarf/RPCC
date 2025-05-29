@@ -262,7 +262,7 @@ pub fn untar_zstd<R: std::io::Read + ?Sized>(
         let size = entry.size();
         let mut buf = Vec::new();
         let _ = entry.read_to_end(&mut buf);
-        let path = entry.header().path()?;
+        let path = entry.path()?;
         let modified_time = entry.header().mtime()?;
         tx.send((path.to_path_buf(), buf, modified_time))?;
         progress.tx.send(utils::ProgressData::Data((
@@ -282,16 +282,6 @@ pub fn untar_zstd<R: std::io::Read + ?Sized>(
     } else {
         Ok(())
     }
-
-    // // Extract files
-    // tar_archive.unpack(dest_dir).map_err(|e| {
-    //     Error::msg(format!(
-    //         "Failed to extract tarball to {:?}: {:?}",
-    //         dest_dir, e
-    //     ))
-    // })?;
-
-    // Ok(())
 }
 
 #[cfg(test)]
