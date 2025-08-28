@@ -13,8 +13,7 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
     let mut total_zip_writer = zip::ZipWriter::new(output);
 
     let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .large_file(true);
+        .compression_method(zip::CompressionMethod::Deflated);
 
     let (tx, rx) = std::sync::mpsc::sync_channel(100);
     let src_dir_buf = src_dir.to_path_buf();
@@ -46,7 +45,7 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
                 let mut buff = std::io::Cursor::new(Vec::new());
                 {
                     let mut zip_writer = zip::ZipWriter::new(&mut buff);
-                    zip_writer.start_file(&relpath_str, options.clone())?;
+                    zip_writer.start_file(&relpath_str, options.clone().large_file(raw_size > 0xFFFFFFFF))?;
                     let data = std::fs::read(path)?;
                     zip_writer.write_all(&data)?;
                     zip_writer.finish()?;
@@ -73,9 +72,8 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
 
     let progress = utils::Progress::new(log_level, "+".to_string());
 
-    while let Ok((relpath_str, mut zip_archive, raw_size)) = rx.recv() {
-        let zip_file = zip_archive.by_name(&relpath_str)?;
-        total_zip_writer.raw_copy_file(zip_file).with_context(|| {
+    while let Ok((relpath_str, zip_archive, raw_size)) = rx.recv() {
+        total_zip_writer.merge_archive(zip_archive).with_context(|| {
             format!(
                 "Failed to append data for file {:?} to zip archive",
                 &relpath_str
