@@ -13,7 +13,8 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
     let mut total_zip_writer = zip::ZipWriter::new(output);
 
     let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .large_file(true);
 
     let (tx, rx) = std::sync::mpsc::sync_channel(100);
     let src_dir_buf = src_dir.to_path_buf();
@@ -70,7 +71,7 @@ pub fn zip<W: std::io::Write + std::io::Seek + ?Sized>(
         }
     });
 
-    let progress = utils::Progress::new(log_level, "C".to_string());
+    let progress = utils::Progress::new(log_level, "+".to_string());
 
     while let Ok((relpath_str, mut zip_archive, raw_size)) = rx.recv() {
         let zip_file = zip_archive.by_name(&relpath_str)?;
@@ -138,7 +139,7 @@ pub fn unzip<R: std::io::Read + std::io::Seek + ?Sized>(
         }
     });
 
-    let progress = utils::Progress::new(log_level, "Dec".to_string());
+    let progress = utils::Progress::new(log_level, "+".to_string());
 
     let dest_dir_buf = dest_dir.to_path_buf();
     let archive = &mut zip::ZipArchive::new(input)?;

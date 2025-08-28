@@ -21,7 +21,7 @@ impl TarWriter {
         small_file_size: u64,
         log_level: u8,
     ) -> Result<std::thread::JoinHandle<Result<(), Error>>, Error> {
-        let progress = utils::Progress::new(log_level, "C".to_string());
+        let progress = utils::Progress::new(log_level, "+".to_string());
 
         let (tx, rx) = std::sync::mpsc::sync_channel(100);
         let src_dir_buf = src_dir.to_path_buf();
@@ -250,7 +250,7 @@ pub fn untar_zstd<R: std::io::Read + ?Sized>(
 
     // Extract
 
-    let progress = utils::Progress::new(log_level, "Dec".to_string());
+    let progress = utils::Progress::new(log_level, "+".to_string());
 
     let entries = tar_archive.entries()?;
     for entry in entries {
